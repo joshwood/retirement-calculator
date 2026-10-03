@@ -20,3 +20,35 @@ export function projectSavings(input: Assumptions): ProjectionRow[] {
   }
   return rows;
 }
+
+export const ACCOUNT_TYPES = ['401(k) / 403(b)', 'Traditional IRA', 'Roth IRA', 'Taxable brokerage', 'Savings / cash', 'Other'] as const;
+export type Account = {
+  id: string;
+  name: string;
+  type: typeof ACCOUNT_TYPES[number];
+  balance: number;
+  priceGrowth: number;
+  incomeYield: number;
+  monthlyContribution: number;
+};
+export const MAX_ACCOUNTS = 20;
+export function projectAccounts(accounts: Account[], years: number) {
+  if (!accounts.length || accounts.length > MAX_ACCOUNTS) throw new RangeError('Configure between 1 and 20 accounts.');
+  if (new Set(accounts.map(a => a.id)).size !== accounts.length) throw new RangeError('Account identifiers must be unique.');
+  const byAccount = accounts.map(account => {
+    if (!account.id || !account.name.trim() || account.name.length > 60) throw new RangeError('Give each account a name of 1–60 characters.');
+    if (!ACCOUNT_TYPES.includes(account.type)) throw new RangeError('Choose a supported account type.');
+    if (!Number.isFinite(account.priceGrowth) || account.priceGrowth < -99 || account.priceGrowth > 30) throw new RangeError('Price growth must be between -99% and 30%.');
+    if (!Number.isFinite(account.incomeYield) || account.incomeYield < 0 || account.incomeYield > 30) throw new RangeError('Dividend / interest yield must be between 0% and 30%.');
+    const annualReturn = account.priceGrowth + account.incomeYield;
+    if (annualReturn > 30) throw new RangeError('Price growth plus dividend / interest yield must be at most 30%.');
+    return { account, rows: projectSavings({startingBalance: account.balance, monthlyContribution: account.monthlyContribution, years, annualReturn}) };
+  });
+  const rows = byAccount[0].rows.map((row, index) => ({
+    year: row.year,
+    balance: byAccount.reduce((sum, item) => sum + item.rows[index].balance, 0),
+    invested: byAccount.reduce((sum, item) => sum + item.rows[index].invested, 0),
+    growth: byAccount.reduce((sum, item) => sum + item.rows[index].growth, 0),
+  }));
+  return { rows, byAccount };
+}
