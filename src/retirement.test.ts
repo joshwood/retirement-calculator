@@ -55,7 +55,7 @@ test("capital gains stack over ordinary income; unused deduction offsets gains",
   near(
     federalTax(16100 + 49450, 1000, "single") -
       federalTax(16100 + 49450, 0, "single"),
-    150,
+    125,
   );
   near(
     federalTax(16100 + 545500, 1000, "single") -
@@ -353,4 +353,23 @@ test("later investment income can breach withdrawal MAGI guardrail and is flagge
   ).rows[0];
   assert.equal(r.magiExceeded, true);
   assert.ok(r.magi > 100);
+});
+
+test("IRS Worksheet 2-7 final minimum protects the 12-percent ordinary band", () => {
+  near(federalTax(65550, 950, "single"), 5800);
+  near(federalTax(65550, 1000, "single"), 5811);
+  near(federalTax(65550, 950, "single"), federalTax(66500, 0, "single"));
+  // Both sides of the final minimum: preferential tax wins once enough gains
+  // extend into the 22-percent ordinary band.
+  near(federalTax(65550, 2000, "single"), 5986);
+  for (const status of Object.keys(TAX_RULES) as (keyof typeof TAX_RULES)[]) {
+    for (const ordinary of [0, 30000, 65550, 120000, 600000]) {
+      for (const gains of [0, 950, 2000, 100000]) {
+        assert.ok(
+          federalTax(ordinary, gains, status) <=
+            federalTax(ordinary + gains, 0, status) + 1e-8,
+        );
+      }
+    }
+  }
 });

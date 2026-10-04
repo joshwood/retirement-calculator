@@ -39,18 +39,25 @@ export function federalTax(
   const r = TAX_RULES[status],
     o = Math.max(0, ordinary - r.deduction),
     g = Math.max(0, gains - Math.max(0, r.deduction - ordinary));
-  let tax = 0,
-    lower = 0;
-  [...r.brackets, Infinity].forEach((upper, i) => {
-    tax +=
-      Math.max(0, Math.min(o, upper) - lower) *
-      [0.1, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37][i];
-    lower = upper;
-  });
+  const ordinaryRateTax = (taxableIncome: number) => {
+    let tax = 0,
+      lower = 0;
+    [...r.brackets, Infinity].forEach((upper, i) => {
+      tax +=
+        Math.max(0, Math.min(taxableIncome, upper) - lower) *
+        [0.1, 0.12, 0.22, 0.24, 0.32, 0.35, 0.37][i];
+      lower = upper;
+    });
+    return tax;
+  };
   const zero = Math.min(g, Math.max(0, r.gains[0] - o)),
     fifteen = Math.min(
       g - zero,
       Math.max(0, r.gains[1] - Math.max(o, r.gains[0])),
     );
-  return tax + fifteen * 0.15 + (g - zero - fifteen) * 0.2;
+  // Publication 505 (2026), Worksheet 2-7, lines 39–40: use the smaller
+  // of the preferential computation and ordinary-rate tax on all taxable income.
+  const preferentialTax =
+    ordinaryRateTax(o) + fifteen * 0.15 + (g - zero - fifteen) * 0.2;
+  return Math.min(preferentialTax, ordinaryRateTax(o + g));
 }
