@@ -130,6 +130,37 @@ assert.equal(
   await page.evaluate(() => localStorage.length + sessionStorage.length),
   0,
 );
+await page
+  .getByRole("button", { name: "Configure accounts (1)", exact: true })
+  .click();
+await page.getByLabel("Account type", { exact: true }).selectOption("Roth IRA");
+await page.getByRole("button", { name: "Save accounts", exact: true }).click();
+await page
+  .getByRole("alert")
+  .filter({ hasText: "earliest same-owner" })
+  .waitFor();
+await page
+  .getByLabel(/Earliest same-owner Roth IRA contribution tax year/)
+  .fill("2026");
+assert.equal(await page.getByRole("alert").count(), 0);
+await page.getByLabel("Remaining regular contribution basis ($)").fill("");
+await page.getByRole("alert").filter({ hasText: "Basis must be" }).waitFor();
+await page.getByLabel("Remaining regular contribution basis ($)").fill("10000");
+await page
+  .getByRole("button", { name: "Configure accounts (1)", exact: true })
+  .click();
+await page.getByRole("button", { name: "Add account", exact: true }).click();
+await page
+  .getByLabel("Account type", { exact: true })
+  .last()
+  .selectOption("Roth IRA");
+await page.getByRole("button", { name: "Save accounts", exact: true }).click();
+await page
+  .getByRole("alert")
+  .filter({ hasText: "one pooled same-owner" })
+  .waitFor();
+await page.getByRole("button", { name: "Savings growth", exact: true }).click();
+await page.getByText("Your savings over time", { exact: true }).waitFor();
 assert.deepEqual(errors, []);
 await browser.close();
 console.log(

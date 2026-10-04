@@ -329,7 +329,7 @@ test("negative-return brokerage and Roth basis cannot make negative balances", (
     accounts,
     {
       a: { ...defaultAccess(), taxableBasis: 100000 },
-      r: { ...defaultAccess(), rothBasis: 80000 },
+      r: { ...defaultAccess(), rothBasis: 80000, rothFirstYear: 2020 },
     },
     { ...retired, years: 5, spending: 40000 },
   );
@@ -372,4 +372,124 @@ test("IRS Worksheet 2-7 final minimum protects the 12-percent ordinary band", ()
       }
     }
   }
+});
+test("employer-plan permission and separation are required even after age 59½", () => {
+  const a = { ...account, type: "401(k) / 403(b)" as const },
+    birth = dateOf("1966-01-01"),
+    date = dateOf("2026-12-31");
+  for (const o of [
+    defaultAccess(),
+    { ...defaultAccess(), planAllows: true },
+    { ...defaultAccess(), separationDate: "2026-01-01" },
+    { ...defaultAccess(), planAllows: true, separationDate: "2027-01-01" },
+  ])
+    assert.equal(accessLimit(a, o, 100000, 0, birth, date), 0);
+  const permitted = {
+    ...defaultAccess(),
+    planAllows: true,
+    separationDate: "2026-07-15",
+  };
+  assert.equal(
+    accessLimit(a, permitted, 100000, 0, birth, dateOf("2026-07-14")),
+    0,
+  );
+  assert.equal(
+    accessLimit(a, permitted, 100000, 0, birth, dateOf("2026-07-15")),
+    100000,
+  );
+  assert.equal(
+    accessLimit(
+      { ...a, type: "Traditional IRA" },
+      defaultAccess(),
+      100000,
+      0,
+      birth,
+      date,
+    ),
+    100000,
+  );
+});
+test("active employee age60 cannot withdraw an unverified employer plan to pay investment tax", () => {
+  const a = { ...account, type: "401(k) / 403(b)" as const },
+    brokerage = {
+      ...account,
+      id: "brokerage",
+      type: "Taxable brokerage" as const,
+      incomeYield: 5,
+    };
+  const p = {
+    ...defaultPlan,
+    birthDate: "1966-01-01",
+    retirementAgeMonths: 65 * 12,
+    years: 1,
+    salary: 80000,
+  };
+  const r = projectRetirement([a, brokerage], {}, p).rows[0];
+  near(r.accounts[0], 100000);
+  near(r.withdrawals, 0);
+  near(r.magi, 85000);
+  near(r.taxShortfall, 1100);
+  const allowed = projectRetirement(
+    [a, brokerage],
+    {
+      a: { ...defaultAccess(), planAllows: true, separationDate: "2026-01-01" },
+    },
+    p,
+  ).rows[0];
+  near(allowed.taxShortfall, 0);
+  assert.ok(allowed.accounts[0] < 100000);
+  assert.ok(allowed.withdrawals > 1100);
+});
+
+test("multiple same-owner Roth IRA entries are rejected instead of misallocating aggregate basis", () => {
+  const a = {
+      ...account,
+      type: "Roth IRA" as const,
+      balance: 10000,
+      priceGrowth: -99,
+    },
+    b = { ...account, id: "b", type: "Roth IRA" as const };
+  assert.throws(
+    () =>
+      projectRetirement(
+        [a, b],
+        {
+          a: { ...defaultAccess(), rothBasis: 10000, rothFirstYear: 2020 },
+          b: { ...defaultAccess(), rothFirstYear: 2020 },
+        },
+        {
+          ...retired,
+          birthDate: "1986-01-01",
+          retirementAgeMonths: 480,
+          spending: 10000,
+        },
+      ),
+    /one pooled same-owner/,
+  );
+});
+test("Roth planner requires first year and supports explicit projected first contribution year", () => {
+  const a = {
+    ...account,
+    type: "Roth IRA" as const,
+    balance: 0,
+    monthlyContribution: 100,
+    incomeYield: 5,
+  };
+  const p = {
+    ...defaultPlan,
+    birthDate: "1960-01-01",
+    retirementAgeMonths: 72 * 12,
+    years: 7,
+    spending: 1200,
+    inflation: 0,
+  };
+  assert.throws(() => projectRetirement([a], {}, p), /earliest same-owner/);
+  const r = projectRetirement(
+    [a],
+    { a: { ...defaultAccess(), rothFirstYear: 2026 } },
+    p,
+  ).rows.at(-1)!;
+  assert.equal(r.phase, "Retired");
+  near(r.accessible, r.balance);
+  near(r.shortfall, 0);
 });

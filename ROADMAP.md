@@ -12,7 +12,7 @@ This release is a deterministic educational planner, not an optimizer, tax retur
 - Transparent withdrawal heuristic: cash, brokerage, Roth IRA, pretax; stable input order within types. Optional MAGI target caps income-producing withdrawals using income recognized so far plus the year's wages. Later yield can breach the target. It is not global optimization or a guaranteed MAGI cap.
 - Federal ordinary brackets and positive long-term capital-gain stacking from verified 2026 tables. Standard deduction for four filing statuses. Constants frozen, not indexed in future projections.
 - Brokerage pro-rata basis; entered basis required to withdraw. Positive gains assumed long-term, reinvested dividends/interest conservatively ordinary. No realized-loss deduction or carryforward.
-- Conservative pretax age-59½ access, verified-plan Rule of 55 conditions, Roth regular contribution basis and separate qualified-distribution five-tax-year clock. Unknown/unsupported access is blocked explicitly.
+- Conservative IRA age-59½ access, employer-plan access requiring verified distribution permission and separation at every age (in-service distributions unsupported), verified-plan Rule of 55 conditions, Roth regular contribution basis and separate qualified-distribution five-tax-year clock. Unknown/unsupported access is blocked explicitly.
 - ACA MAGI addbacks and fixed 2026 reference FPL, contiguous 48/DC only. No premium credit, eligibility or repayment calculation. Alaska/Hawaii not supported in this increment.
 - SEPP: optional separate hypothetical account, fixed user-supplied annual payment illustrated monthly, investment return, depletion/gaps, and commitment to the later of exact fifth anniversary or age 59½. **Not integrated with main portfolio and not an IRS payment calculation or certified schedule.**
 
@@ -58,3 +58,7 @@ Research supplied by the parent research task; 2026 base-year assumptions, not a
 - [HealthCare.gov: MAGI](https://www.healthcare.gov/income-and-household-information/income/)
 - [HealthCare.gov: FPL](https://www.healthcare.gov/glossary/federal-poverty-level-fpl/)
 - [IRS: NIIT (currently excluded)](https://www.irs.gov/individuals/net-investment-income-tax)
+
+Employer-plan access source: [IRS general distribution rules](https://www.irs.gov/retirement-plans/plan-participant-employee/401k-resource-guide-plan-participants-general-distribution-rules). Age 59½ concerns additional tax; plan distribution terms remain a separate condition.
+
+Roth IRA scope: the retirement planner requires **one pooled same-owner Roth IRA entry**, combined regular contribution basis and the earliest same-owner contribution year. Multiple Roth IRA entries are rejected rather than incorrectly allocating aggregated IRS basis between accounts. Separate spouse-owned Roth planning and account-level aggregate withdrawal allocation are deferred. The first contribution year is required, including the projected start year for a new account with no prior history and contributions beginning immediately. Savings growth still permits multiple Roth labels because it does not model withdrawal tax/access.

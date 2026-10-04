@@ -111,6 +111,14 @@ export function accessLimit(
   if (a.type === "Taxable brokerage")
     return o.taxableBasis === null ? 0 : balance;
   if (traditional(a)) {
+    // Age determines the additional-tax exception, not plan distribution rights.
+    // This bounded model supports only verified distributions after separation;
+    // in-service distributions remain unavailable even after age 59½.
+    if (
+      a.type === "401(k) / 403(b)" &&
+      (!o.planAllows || !o.separationDate || dateOf(o.separationDate) > date)
+    )
+      return 0;
     if (date >= addMonths(birth, 714)) return balance;
     if (
       a.type === "401(k) / 403(b)" &&
@@ -141,6 +149,10 @@ export function validatePlan(
   p: Plan,
 ) {
   projectAccounts(accounts, 0);
+  if (accounts.filter((a) => a.type === "Roth IRA").length > 1)
+    throw new RangeError(
+      "Retirement cashflow supports one pooled same-owner Roth IRA entry. Combine that owner's Roth IRA balances, remaining regular contribution basis and earliest contribution year before planning; separate Roth IRA entries are unsupported.",
+    );
   const birth = dateOf(p.birthDate),
     start = new Date(Date.UTC(p.startYear, 0, 1));
   if (
@@ -188,6 +200,10 @@ export function validatePlan(
     throw new RangeError("Choose valid planning options.");
   for (const a of accounts) {
     const o = options[a.id] ?? defaultAccess();
+    if (a.type === "Roth IRA" && o.rothFirstYear === null)
+      throw new RangeError(
+        `${a.name}: enter the earliest same-owner Roth IRA contribution tax year. For a new Roth with no prior history, enter the projected first contribution year (the start year if contributing from the start).`,
+      );
     for (const v of [o.taxableBasis, o.rothBasis])
       if (v !== null && (!Number.isFinite(v) || v < 0 || v > 1e9))
         throw new RangeError("Basis must be between 0 and 1 billion.");
@@ -229,6 +245,11 @@ export function projectRetirement(
     firstDepletion: number | null = null;
   const warnings = new Set<string>();
   for (const s of states) {
+    if (s.a.type === "401(k) / 403(b)") {
+      warnings.add(
+        `${s.a.name}: employer-plan withdrawals require a separation date and verified permission at every age. In-service distributions are not modeled; age 59½ alone does not establish plan access.`,
+      );
+    }
     if (s.a.type === "Other")
       warnings.add(
         "Other accounts count as assets but cannot fund withdrawals: tax/access treatment is unspecified.",

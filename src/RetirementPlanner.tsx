@@ -526,7 +526,8 @@ export function RetirementPlanner({ accounts }: { accounts: Account[] }) {
                     </div>
                     <div>
                       <label htmlFor={`${a.id}-roth-year`}>
-                        First Roth IRA contribution tax year (blank = unknown)
+                        Earliest same-owner Roth IRA contribution tax year
+                        (required)
                       </label>
                       <input
                         id={`${a.id}-roth-year`}
@@ -544,10 +545,18 @@ export function RetirementPlanner({ accounts }: { accounts: Account[] }) {
                       />
                     </div>
                     <p className="hint">
-                      Contributions first. Remaining assets require both age 59½
-                      and the five-tax-year qualification clock. Conversion
-                      histories are not modeled. Future Roth contributions are
-                      assumed regular and eligible; verify limits yourself.
+                      Use one pooled same-owner Roth IRA entry: combined
+                      balances, combined remaining regular contribution basis,
+                      and the earliest contribution tax year across that owner's
+                      Roth IRAs. Separate entries and spouse-owned Roth IRAs are
+                      unsupported in this planner. For a new Roth with no prior
+                      history, enter the projected first contribution year; use
+                      the start year when modeled contributions begin
+                      immediately. Contributions first. Remaining assets require
+                      both age 59½ and the five-tax-year qualification clock.
+                      Conversion histories are not modeled. Future Roth
+                      contributions are assumed regular and eligible; verify
+                      limits yourself.
                     </p>
                   </div>
                 )}
@@ -563,43 +572,46 @@ export function RetirementPlanner({ accounts }: { accounts: Account[] }) {
                       />
                       Model Rule of 55 for this employer's pretax plan
                     </label>
-                    {o.rule55 && (
-                      <>
-                        <label htmlFor={`${a.id}-separation`}>
-                          Separation date for this plan's employer
-                        </label>
+                    <>
+                      <label htmlFor={`${a.id}-separation`}>
+                        Separation date for this plan's employer
+                      </label>
+                      <input
+                        id={`${a.id}-separation`}
+                        type="date"
+                        value={o.separationDate}
+                        onChange={(e) =>
+                          changeAccess(a.id, {
+                            separationDate: e.target.value,
+                          })
+                        }
+                      />
+                      <label className="check">
                         <input
-                          id={`${a.id}-separation`}
-                          type="date"
-                          value={o.separationDate}
+                          type="checkbox"
+                          checked={o.planAllows}
                           onChange={(e) =>
                             changeAccess(a.id, {
-                              separationDate: e.target.value,
+                              planAllows: e.target.checked,
                             })
                           }
                         />
-                        <label className="check">
-                          <input
-                            type="checkbox"
-                            checked={o.planAllows}
-                            onChange={(e) =>
-                              changeAccess(a.id, {
-                                planAllows: e.target.checked,
-                              })
-                            }
-                          />
-                          I have verified this plan permits the modeled
-                          distributions after separation
-                        </label>
-                        <p className="hint">
-                          Separation must occur in or after the calendar year
-                          turning 55. Reaching 55 after an earlier separation
-                          does not qualify. This exception is unavailable for
-                          IRAs. Public-safety exceptions and rollover histories
-                          are not modeled.
-                        </p>
-                      </>
-                    )}
+                        I have verified this plan permits the modeled
+                        distributions after the specified separation date
+                        (required at every age)
+                      </label>
+                      <p className="hint">
+                        In-service withdrawals are not modeled. At any age, this
+                        account stays unavailable until the entered separation
+                        date and verified plan permission. Age 59½ removes the
+                        additional-tax restriction; it does not establish
+                        distribution rights. For Rule of 55, separation must
+                        occur in or after the calendar year turning 55. Reaching
+                        55 after an earlier separation does not qualify. This
+                        exception is unavailable for IRAs. Public-safety
+                        exceptions and rollover histories are not modeled.
+                      </p>
+                    </>
                   </>
                 )}
                 {a.type === "Traditional IRA" && (
