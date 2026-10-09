@@ -137,60 +137,41 @@ function App() {
   const final = rows?.at(-1);
   return (
     <>
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="Retirement Calculator home">
-          <span className="brand-mark" aria-hidden="true">
-            R
-          </span>
-          Retirement Calculator
-        </a>
-        <span className="top-note">A little clarity for the long term.</span>
+      <header className="app-header">
+        <div className="header-inner">
+          <div className="header-title">
+            <h1>
+              <a className="brand" href="/" aria-label="Retirement Calculator home">
+                <span className="brand-mark" aria-hidden="true">R</span>
+                Retirement Calculator
+              </a>
+            </h1>
+            <p className="intro">Plan the years ahead. A little clarity for the long term.</p>
+          </div>
+          <div className="header-tools">
+            <div
+              className="view-switch mode-switch"
+              role="group"
+              aria-label="Calculator mode"
+            >
+              <button
+                aria-pressed={mode === "retirement"}
+                onClick={() => setMode("retirement")}
+              >
+                Retirement cashflow
+              </button>
+              <button
+                aria-pressed={mode === "savings"}
+                onClick={() => setMode("savings")}
+              >
+                Savings growth
+              </button>
+            </div>
+            <p className="header-privacy">Calculations stay in your browser. Save only when you export a file.</p>
+          </div>
+        </div>
       </header>
       <main>
-        <div className="page-heading">
-          <div>
-            <p className="eyebrow">THE BIG PICTURE</p>
-            <h1>Plan the years ahead.</h1>
-            <p className="intro">
-              Explore saving, retirement income and account access.
-            </p>
-          </div>
-          <div className="privacy-note">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              aria-hidden="true"
-            >
-              <rect x="5" y="10" width="14" height="11" rx="3" />
-              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-            </svg>
-            <span>
-              Calculations stay in your browser.
-              <br />
-              Save only when you export a file.
-            </span>
-          </div>
-        </div>
-        <div
-          className="view-switch mode-switch"
-          role="group"
-          aria-label="Calculator mode"
-        >
-          <button
-            aria-pressed={mode === "retirement"}
-            onClick={() => setMode("retirement")}
-          >
-            Retirement cashflow
-          </button>
-          <button
-            aria-pressed={mode === "savings"}
-            onClick={() => setMode("savings")}
-          >
-            Savings growth
-          </button>
-        </div>
         <div hidden={mode !== "retirement"}>
           <RetirementPlanner
             key={resetKey}
