@@ -7,7 +7,13 @@ export const TAX_RULES = {
     gains: [49450, 545500],
   },
   joint: {
-    label: "Married filing jointly / qualifying surviving spouse",
+    label: "Married filing jointly",
+    deduction: 32200,
+    brackets: [24800, 100800, 211400, 403550, 512450, 768700],
+    gains: [98900, 613700],
+  },
+  survivor: {
+    label: "Qualifying surviving spouse",
     deduction: 32200,
     brackets: [24800, 100800, 211400, 403550, 512450, 768700],
     gains: [98900, 613700],

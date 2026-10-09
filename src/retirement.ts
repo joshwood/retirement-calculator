@@ -1,3 +1,9 @@
+import {
+  taxableSocialSecurity,
+  rmdStartAge,
+  ownerRmd,
+  seppPayment,
+} from "./income.ts";
 import { projectAccounts, type Account } from "./projection.ts";
 import { federalTax, TAX_RULES, type FilingStatus } from "./tax.ts";
 export type Access = {
@@ -7,6 +13,43 @@ export type Access = {
   separationDate: string;
   rule55: boolean;
   planAllows: boolean;
+  priorYearBalance?: number | null;
+};
+export type IncomePlan = {
+  socialSecurityMonthly: number;
+  socialSecurityStart: string;
+  socialSecurityCola: number;
+  taxExemptInterest: number;
+  separateLivedTogether: boolean;
+  rmdEnabled: boolean;
+  rmd1959Age: 73 | 75;
+  sepp: {
+    enabled: boolean;
+    accountId: string;
+    firstPayment: string;
+    method: "verified" | "rmd" | "amortization";
+    annualPayment: number;
+    rate: number;
+    acknowledged: boolean;
+  };
+};
+export const defaultIncome: IncomePlan = {
+  socialSecurityMonthly: 0,
+  socialSecurityStart: "2053-01-01",
+  socialSecurityCola: 0,
+  taxExemptInterest: 0,
+  separateLivedTogether: true,
+  rmdEnabled: true,
+  rmd1959Age: 73,
+  sepp: {
+    enabled: false,
+    accountId: "",
+    firstPayment: "2026-01-01",
+    method: "verified",
+    annualPayment: 20000,
+    rate: 4,
+    acknowledged: false,
+  },
 };
 export type Plan = {
   startYear: number;
@@ -22,6 +65,7 @@ export type Plan = {
   strategy: "spending" | "magi";
   magiTarget: number;
   magiAddbacks: number;
+  income?: IncomePlan;
 };
 export type Annual = {
   year: number;
@@ -43,6 +87,15 @@ export type Annual = {
   accessible: number;
   accounts: number[];
   magiExceeded: boolean;
+  socialSecurity: number;
+  taxableSocialSecurity: number;
+  rmdRequired: number;
+  rmdPaid: number;
+  rmdShortfall: number;
+  seppPayment: number;
+  seppShortfall: number;
+  cashReserve: number;
+  investmentGrowth: number;
 };
 export const defaultAccess = (): Access => ({
   taxableBasis: null,
@@ -135,6 +188,7 @@ export function accessLimit(
   if (a.type === "Roth IRA") {
     if (
       date >= addMonths(birth, 714) &&
+      a.type === "Roth IRA" &&
       o.rothFirstYear !== null &&
       date.getUTCFullYear() >= o.rothFirstYear + 5
     )
@@ -176,18 +230,23 @@ export function validatePlan(
     p.retirementAgeMonths > 1200
   )
     throw new RangeError("Retirement age must be 18–100, in whole months.");
-  for (const k of ["salary", "spending", "magiTarget", "magiAddbacks"] as const)
+  for (const k of [
+    "salary",
+    ...(p.mode === "spending" ? ["spending"] : []),
+    "magiTarget",
+    "magiAddbacks",
+  ] as ("salary" | "spending" | "magiTarget" | "magiAddbacks")[])
     if (!Number.isFinite(p[k]) || p[k] < 0 || p[k] > 1e8)
       throw new RangeError(
         "Dollar assumptions must be between 0 and 100 million.",
       );
   if (
-    !Number.isFinite(p.inflation) ||
-    p.inflation < 0 ||
-    p.inflation > 20 ||
-    !Number.isFinite(p.withdrawalPercent) ||
-    p.withdrawalPercent < 0 ||
-    p.withdrawalPercent > 100
+    (p.mode === "spending" &&
+      (!Number.isFinite(p.inflation) || p.inflation < 0 || p.inflation > 20)) ||
+    (p.mode === "percent" &&
+      (!Number.isFinite(p.withdrawalPercent) ||
+        p.withdrawalPercent < 0 ||
+        p.withdrawalPercent > 100))
   )
     throw new RangeError(
       "Inflation must be 0–20%; withdrawal rate must be 0–100%.",
@@ -204,14 +263,15 @@ export function validatePlan(
       throw new RangeError(
         `${a.name}: enter the earliest same-owner Roth IRA contribution tax year. For a new Roth with no prior history, enter the projected first contribution year (the start year if contributing from the start).`,
       );
-    for (const v of [o.taxableBasis, o.rothBasis])
+    for (const v of a.type === "Roth IRA"
+      ? [o.rothBasis]
+      : a.type === "Taxable brokerage"
+        ? [o.taxableBasis]
+        : [])
       if (v !== null && (!Number.isFinite(v) || v < 0 || v > 1e9))
         throw new RangeError("Basis must be between 0 and 1 billion.");
-    if (o.rothBasis > a.balance)
-      throw new RangeError(
-        `${a.name}: remaining Roth regular contribution basis cannot exceed balance in this simplified model.`,
-      );
     if (
+      a.type === "Roth IRA" &&
       o.rothFirstYear !== null &&
       (!Number.isInteger(o.rothFirstYear) ||
         o.rothFirstYear < 1998 ||
@@ -220,7 +280,73 @@ export function validatePlan(
       throw new RangeError(
         "Roth first contribution tax year must be 1998 through the start year.",
       );
-    if (o.separationDate) dateOf(o.separationDate);
+    if (a.type === "401(k) / 403(b)" && o.separationDate)
+      dateOf(o.separationDate);
+    if (
+      (p.income ?? defaultIncome).rmdEnabled &&
+      traditional(a) &&
+      o.priorYearBalance != null &&
+      (!Number.isFinite(o.priorYearBalance) ||
+        o.priorYearBalance < 0 ||
+        o.priorYearBalance > 1e9)
+    )
+      throw new RangeError("Prior December 31 balance must be 0–1 billion.");
+  }
+  const income = p.income ?? defaultIncome;
+  for (const v of [income.socialSecurityMonthly, income.taxExemptInterest])
+    if (!Number.isFinite(v) || v < 0 || v > 1e8)
+      throw new RangeError("Income amounts must be 0–100 million.");
+  if (
+    !Number.isFinite(income.socialSecurityCola) ||
+    income.socialSecurityCola < 0 ||
+    income.socialSecurityCola > 20
+  )
+    throw new RangeError("Social Security COLA must be 0–20%.");
+  if (
+    income.socialSecurityMonthly > 0 &&
+    dateOf(income.socialSecurityStart) < birth
+  )
+    throw new RangeError("Social Security start must follow birth.");
+  if (![73, 75].includes(income.rmd1959Age))
+    throw new RangeError("Choose a 1959-cohort RMD assumption.");
+  const sp = income.sepp;
+  if (sp.enabled) {
+    const a = accounts.find((a) => a.id === sp.accountId),
+      first = dateOf(sp.firstPayment);
+    if (!a || a.type !== "Traditional IRA")
+      throw new RangeError("Select a dedicated traditional IRA for SEPP.");
+    if (a.monthlyContribution !== 0)
+      throw new RangeError(
+        "The dedicated SEPP IRA must have zero contributions throughout this model.",
+      );
+    if (!sp.acknowledged)
+      throw new RangeError(
+        "Acknowledge the SEPP commitment and dedicated-account restrictions.",
+      );
+    if (first < start || first >= addMonths(start, p.years * 12))
+      throw new RangeError(
+        "SEPP must start within the projection; existing arrangements are unsupported.",
+      );
+    if (ageAt(birth, first) < 18 || first >= addMonths(birth, 714))
+      throw new RangeError("SEPP must start at age 18 to under 59½.");
+    if (!["verified", "rmd", "amortization"].includes(sp.method))
+      throw new RangeError("Choose a supported SEPP method.");
+    if (
+      sp.method === "verified" &&
+      (!Number.isFinite(sp.annualPayment) ||
+        sp.annualPayment <= 0 ||
+        sp.annualPayment > 1e8)
+    )
+      throw new RangeError(
+        "Enter a verified positive annual SEPP payment up to 100 million.",
+      );
+    if (sp.method === "amortization")
+      seppPayment(
+        a.balance,
+        first.getUTCFullYear() - birth.getUTCFullYear(),
+        "amortization",
+        sp.rate,
+      );
   }
 }
 export function projectRetirement(
@@ -231,25 +357,51 @@ export function projectRetirement(
   validatePlan(accounts, options, p);
   const birth = dateOf(p.birthDate),
     retire = addMonths(birth, p.retirementAgeMonths);
-  const states = accounts.map((a) => {
-    const o = options[a.id] ?? defaultAccess();
-    return {
-      a,
-      o,
-      balance: a.balance,
-      basis: a.type === "Roth IRA" ? o.rothBasis : (o.taxableBasis ?? 0),
-    };
-  });
-  const rows: Annual[] = [];
+  const income = p.income ?? defaultIncome,
+    sp = income.sepp;
+  const spFirst = sp.enabled ? dateOf(sp.firstPayment) : null;
+  const spEnd = sp.enabled
+    ? dateOf(seppCommitment(p.birthDate, sp.firstPayment))
+    : null;
+  const states = accounts.map((a) => ({
+    a,
+    o: options[a.id] ?? defaultAccess(),
+    balance: a.balance,
+    basis:
+      a.type === "Roth IRA"
+        ? (options[a.id] ?? defaultAccess()).rothBasis
+        : (options[a.id]?.taxableBasis ?? 0),
+    distributed: 0,
+  }));
+  const locked = (id: string, date: Date) =>
+    sp.enabled && id === sp.accountId && date < spEnd!;
+  const rows: Annual[] = [],
+    warnings = new Set<string>();
   let firstShortfall: number | null = null,
     firstDepletion: number | null = null;
-  const warnings = new Set<string>();
+  let cashReserve = 0,
+    fixedSepp: number | null = null;
+  if (income.socialSecurityMonthly > 0)
+    warnings.add(
+      "Social Security is entered gross before Medicare withholding. Include premiums in spending. Benefits use your first cash-receipt date (first full month on or after it); no earnings-test, benefit estimation or claiming advice.",
+    );
+  if (income.rmdEnabled)
+    warnings.add(
+      "Owner RMDs use the Uniform Lifetime Table, each account separately, with no first-year April deferral, still-working exception, inherited accounts or younger-spouse table. Blank initial prior-year balance means the entered January 1 balance. Mandatory cash is retained without interest.",
+    );
+  if (birth.getUTCFullYear() === 1959 && income.rmdEnabled)
+    warnings.add(
+      `1959 birth cohort: age ${income.rmd1959Age} is an explicit planning assumption; the 2024 final-regulation paragraph was reserved. Verify current law before taking distributions.`,
+    );
+  if (sp.enabled)
+    warnings.add(
+      "SEPP is a planning approximation, not a compliance schedule: monthly installments, prorated first/final calendar years, first-payment/prior-year balance valuation and calendar-year attained age. A professional must verify amount, valuation, first/final-year timing and commitment before implementation. Modifications can cause retroactive additional tax plus interest; no switch, transfers, recapture calculation or annuitization is modeled.",
+    );
   for (const s of states) {
-    if (s.a.type === "401(k) / 403(b)") {
+    if (s.a.type === "401(k) / 403(b)")
       warnings.add(
-        `${s.a.name}: employer-plan withdrawals require a separation date and verified permission at every age. In-service distributions are not modeled; age 59½ alone does not establish plan access.`,
+        `${s.a.name}: employer-plan withdrawals require verified permission and separation at every age. Any unfunded modeled RMD is reported, not silently waived. Still-working RMD deferral is unsupported.`,
       );
-    }
     if (s.a.type === "Other")
       warnings.add(
         "Other accounts count as assets but cannot fund withdrawals: tax/access treatment is unspecified.",
@@ -260,23 +412,38 @@ export function projectRetirement(
       );
     if (s.a.type === "Roth IRA")
       warnings.add(
-        "Roth IRA: only entered regular contribution basis is accessible before qualification. Conversion lots and other exceptions are not modeled.",
+        "Roth IRA: one pooled owner entry; only remaining regular contribution basis is accessible before qualification. No conversion lots or other exceptions. Basis can exceed an underwater balance.",
       );
     if (
+      s.a.type === "401(k) / 403(b)" &&
       s.o.rule55 &&
       (!s.o.planAllows ||
         !s.o.separationDate ||
-        s.a.type !== "401(k) / 403(b)" ||
         dateOf(s.o.separationDate).getUTCFullYear() <
           birth.getUTCFullYear() + 55)
     )
       warnings.add(
-        `${s.a.name}: Rule of 55 conditions are incomplete or outside this model; exception not enabled.`,
+        `${s.a.name}: Rule of 55 conditions are incomplete; exception not enabled.`,
       );
   }
   for (let offset = 0; offset < p.years; offset++) {
     const year = p.startYear + offset,
-      opening = states.reduce((n, s) => n + s.balance, 0);
+      endYear = new Date(Date.UTC(year, 11, 31));
+    const opening = cashReserve + states.reduce((n, s) => n + s.balance, 0);
+    const attainedAge = year - birth.getUTCFullYear();
+    const rmdAge =
+      birth.getUTCFullYear() === 1959
+        ? income.rmd1959Age
+        : rmdStartAge(p.birthDate);
+    const rmdTargets = states.map((s) =>
+      income.rmdEnabled && traditional(s.a) && attainedAge >= rmdAge
+        ? ownerRmd(
+            offset === 0 ? (s.o.priorYearBalance ?? s.balance) : s.balance,
+            attainedAge,
+          )
+        : 0,
+    );
+    states.forEach((s) => (s.distributed = 0));
     let ordinary = 0,
       gains = 0,
       salary = 0,
@@ -284,7 +451,38 @@ export function projectRetirement(
       spending = 0,
       withdrawals = 0,
       shortfall = 0,
-      retiredMonths = 0;
+      retiredMonths = 0,
+      seppTotal = 0,
+      seppShortfall = 0,
+      investmentGrowth = 0;
+    const ssStart =
+      income.socialSecurityMonthly > 0
+        ? dateOf(income.socialSecurityStart)
+        : null;
+    const monthlySS = ssStart
+      ? income.socialSecurityMonthly *
+        (1 + income.socialSecurityCola / 100) **
+          Math.max(0, year - ssStart.getUTCFullYear())
+      : 0;
+    const socialSecurity = Array.from({ length: 12 }, (_, m) =>
+      ssStart && new Date(Date.UTC(year, m, 1)) >= ssStart ? monthlySS : 0,
+    ).reduce((a, b) => a + b, 0);
+    const taxableSS = () =>
+      taxableSocialSecurity(
+        socialSecurity,
+        ordinary + gains,
+        income.taxExemptInterest,
+        p.filing,
+        income.separateLivedTogether,
+      );
+    const totalTax = () => federalTax(ordinary + taxableSS(), gains, p.filing);
+    // Full gross Social Security enters ACA MAGI, independent of its taxable portion.
+    const magiNow = () =>
+      ordinary +
+      gains +
+      socialSecurity +
+      income.taxExemptInterest +
+      p.magiAddbacks;
     const annualSpending =
       p.mode === "percent"
         ? (opening * p.withdrawalPercent) / 100
@@ -292,8 +490,24 @@ export function projectRetirement(
     ordinary = Array.from({ length: 12 }, (_, m) =>
       new Date(Date.UTC(year, m, 1)) < retire ? p.salary / 12 : 0,
     ).reduce((a, b) => a + b, 0);
-    const withdraw = (amount: number, date: Date): number => {
-      let remaining = amount;
+    const distribute = (s: (typeof states)[number], amount: number) => {
+      const take = Math.min(Math.max(0, amount), s.balance);
+      if (!take) return 0;
+      if (traditional(s.a)) ordinary += take;
+      if (s.a.type === "Taxable brokerage") {
+        gains += take * Math.max(0, 1 - s.basis / s.balance);
+        s.basis *= 1 - take / s.balance;
+      }
+      if (s.a.type === "Roth IRA") s.basis = Math.max(0, s.basis - take);
+      s.balance = Math.max(0, s.balance - take);
+      s.distributed += take;
+      withdrawals += take;
+      return take;
+    };
+    const withdraw = (amount: number, date: Date) => {
+      const fromReserve = Math.min(cashReserve, amount);
+      cashReserve -= fromReserve;
+      let remaining = amount - fromReserve;
       const priority = (a: Account) =>
         a.type === "Savings / cash"
           ? 0
@@ -305,62 +519,77 @@ export function projectRetirement(
       for (const s of [...states].sort(
         (a, b) => priority(a.a) - priority(b.a),
       )) {
+        if (locked(s.a.id, date)) continue;
         const available = accessLimit(
-            s.a,
-            s.o,
-            s.balance,
-            s.basis,
-            birth,
-            date,
-          ),
-          fraction =
-            s.a.type === "Taxable brokerage"
-              ? s.balance
-                ? Math.max(0, 1 - s.basis / s.balance)
-                : 0
-              : traditional(s.a)
-                ? 1
-                : 0;
+          s.a,
+          s.o,
+          s.balance,
+          s.basis,
+          birth,
+          date,
+        );
+        const fraction =
+          s.a.type === "Taxable brokerage"
+            ? s.balance
+              ? Math.max(0, 1 - s.basis / s.balance)
+              : 0
+            : traditional(s.a)
+              ? 1
+              : 0;
         const room =
-            p.strategy === "magi" && fraction > 0
-              ? Math.max(
-                  0,
-                  p.magiTarget - (ordinary + gains + p.magiAddbacks),
-                ) / fraction
-              : Infinity,
-          take = Math.max(0, Math.min(remaining, available, room));
-        if (!take) continue;
-        if (traditional(s.a)) ordinary += take;
-        if (s.a.type === "Taxable brokerage") {
-          gains += take * fraction;
-          s.basis *= 1 - take / s.balance;
-        }
-        if (s.a.type === "Roth IRA") s.basis = Math.max(0, s.basis - take);
-        s.balance = Math.max(0, s.balance - take);
-        remaining -= take;
-        withdrawals += take;
+          p.strategy === "magi" && fraction > 0
+            ? Math.max(0, p.magiTarget - magiNow()) / fraction
+            : Infinity;
+        remaining -= distribute(s, Math.min(remaining, available, room));
         if (remaining < 1e-8) break;
       }
       return amount - remaining;
     };
+    let annualSepp = 0;
+    if (
+      sp.enabled &&
+      year > spFirst!.getUTCFullYear() &&
+      new Date(Date.UTC(year, 0, 1)) < spEnd!
+    ) {
+      const s = states.find((s) => s.a.id === sp.accountId)!;
+      annualSepp =
+        sp.method === "rmd"
+          ? seppPayment(s.balance, attainedAge, "rmd", sp.rate)
+          : fixedSepp!;
+    }
     for (let month = 0; month < 12; month++) {
       const start = new Date(Date.UTC(year, month, 1)),
         end = new Date(Date.UTC(year, month + 1, 0)),
         retired = start >= retire;
       if (retired) retiredMonths++;
       else salary += p.salary / 12;
+      if (ssStart && start >= ssStart) cashReserve += monthlySS;
+      // The first-payment valuation is the prior month-end balance, before this month's growth.
+      if (
+        sp.enabled &&
+        year === spFirst!.getUTCFullYear() &&
+        month === spFirst!.getUTCMonth()
+      ) {
+        const s = states.find((s) => s.a.id === sp.accountId)!;
+        annualSepp =
+          sp.method === "verified"
+            ? sp.annualPayment
+            : seppPayment(s.balance, attainedAge, sp.method, sp.rate);
+        fixedSepp = annualSepp;
+      }
       for (const s of states) {
         const total = s.a.priceGrowth + s.a.incomeYield,
-          rate = Math.expm1(Math.log1p(total / 100) / 12),
-          yieldRate =
-            Math.abs(total) > 1e-10
-              ? (rate * s.a.incomeYield) / total
-              : s.a.incomeYield / 1200,
-          income = s.balance * yieldRate;
+          rate = Math.expm1(Math.log1p(total / 100) / 12);
+        const yieldRate =
+          Math.abs(total) > 1e-10
+            ? (rate * s.a.incomeYield) / total
+            : s.a.incomeYield / 1200;
+        const earned = s.balance * yieldRate;
+        investmentGrowth += s.balance * rate;
         s.balance *= 1 + rate;
         if (s.a.type === "Taxable brokerage" || s.a.type === "Savings / cash") {
-          ordinary += income;
-          if (s.a.type === "Taxable brokerage") s.basis += income;
+          ordinary += earned;
+          if (s.a.type === "Taxable brokerage") s.basis += earned;
         }
         if (!retired) {
           const add = s.a.monthlyContribution;
@@ -370,6 +599,34 @@ export function projectRetirement(
             s.basis += add;
         }
       }
+      if (sp.enabled) {
+        const n =
+          (year - spFirst!.getUTCFullYear()) * 12 +
+          month -
+          spFirst!.getUTCMonth();
+        const paymentDate = addMonths(spFirst!, n);
+        if (n >= 0 && paymentDate < spEnd!) {
+          const paid = distribute(
+            states.find((s) => s.a.id === sp.accountId)!,
+            annualSepp / 12,
+          );
+          cashReserve += paid;
+          seppTotal += paid;
+          seppShortfall += annualSepp / 12 - paid;
+        }
+      }
+      // Satisfy outstanding RMD as early as access allows. Other distributions count once.
+      states.forEach((s, i) => {
+        const remaining = Math.max(0, rmdTargets[i] - s.distributed);
+        if (remaining > 0 && !locked(s.a.id, end))
+          cashReserve += distribute(
+            s,
+            Math.min(
+              remaining,
+              accessLimit(s.a, s.o, s.balance, s.basis, birth, end),
+            ),
+          );
+      });
       if (retired) {
         const target = annualSpending / 12;
         spending += target;
@@ -378,22 +635,29 @@ export function projectRetirement(
     }
     const wageTax = federalTax(salary, 0, p.filing);
     let paid = 0;
-    for (let i = 0; i < 100; i++) {
-      const due = Math.max(
-        0,
-        federalTax(ordinary, gains, p.filing) - wageTax - paid,
-      );
-      if (due < 0.000001) break;
-      const funded = withdraw(due, new Date(Date.UTC(year, 11, 31)));
+    for (let i = 0; i < 200; i++) {
+      const due = Math.max(0, totalTax() - wageTax - paid);
+      if (due < 1e-6) break;
+      const funded = withdraw(due, endYear);
       paid += funded;
-      if (funded < due - 0.000001) break;
+      if (funded < due - 1e-6) break;
     }
-    const tax = federalTax(ordinary, gains, p.filing),
+    const tax = totalTax(),
       portfolioTax = Math.max(0, tax - wageTax),
-      taxShortfall = Math.max(0, portfolioTax - paid),
-      balance = states.reduce((n, s) => n + s.balance, 0),
-      magi = ordinary + gains + p.magiAddbacks;
-    if (shortfall + taxShortfall > 0.01 && firstShortfall === null)
+      taxShortfall = Math.max(0, portfolioTax - paid);
+    const balance = cashReserve + states.reduce((n, s) => n + s.balance, 0),
+      magi = magiNow(),
+      taxableBenefit = taxableSS();
+    const rmdRequired = rmdTargets.reduce((a, b) => a + b, 0),
+      rmdPaid = states.reduce(
+        (n, s, i) => n + Math.min(rmdTargets[i], s.distributed),
+        0,
+      ),
+      rmdShortfall = Math.max(0, rmdRequired - rmdPaid);
+    if (
+      shortfall + taxShortfall + seppShortfall + rmdShortfall > 0.01 &&
+      firstShortfall === null
+    )
       firstShortfall = year;
     if (balance < 0.01 && firstDepletion === null) firstDepletion = year;
     if (contributions > salary - wageTax)
@@ -402,7 +666,7 @@ export function projectRetirement(
       );
     rows.push({
       year,
-      age: ageAt(birth, new Date(Date.UTC(year, 11, 31))),
+      age: ageAt(birth, endYear),
       phase:
         retiredMonths === 0
           ? "Working"
@@ -415,31 +679,37 @@ export function projectRetirement(
       withdrawals,
       federalTax: tax,
       portfolioTax,
-      agi: ordinary + gains,
+      agi: ordinary + gains + taxableBenefit,
       taxableIncome: Math.max(
         0,
-        ordinary + gains - TAX_RULES[p.filing].deduction,
+        ordinary + gains + taxableBenefit - TAX_RULES[p.filing].deduction,
       ),
       paycheckAfterFederalTax: salary - wageTax,
       magi,
       shortfall,
       taxShortfall,
       balance,
-      accessible: states.reduce(
-        (n, s) =>
-          n +
-          accessLimit(
-            s.a,
-            s.o,
-            s.balance,
-            s.basis,
-            birth,
-            new Date(Date.UTC(year, 11, 31)),
-          ),
-        0,
-      ),
+      accessible:
+        cashReserve +
+        states.reduce(
+          (n, s) =>
+            n +
+            (locked(s.a.id, endYear)
+              ? 0
+              : accessLimit(s.a, s.o, s.balance, s.basis, birth, endYear)),
+          0,
+        ),
       accounts: states.map((s) => s.balance),
       magiExceeded: magi > p.magiTarget + 0.01,
+      socialSecurity,
+      taxableSocialSecurity: taxableBenefit,
+      rmdRequired,
+      rmdPaid,
+      rmdShortfall,
+      seppPayment: seppTotal,
+      seppShortfall,
+      cashReserve,
+      investmentGrowth,
     });
   }
   return {
@@ -448,6 +718,7 @@ export function projectRetirement(
     firstShortfall,
     firstDepletion,
     retirementDate: retire.toISOString().slice(0, 10),
+    seppEnd: spEnd?.toISOString().slice(0, 10) ?? null,
   };
 }
 /** Commitment only: not an IRS-approved payment calculation. */
